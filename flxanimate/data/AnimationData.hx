@@ -1,12 +1,13 @@
 package flxanimate.data;
 
+import flixel.util.FlxColor;
+import openfl.geom.ColorTransform;
+import openfl.filters.*;
 
 @:noCompletion
 class AnimationData
 {
 	public static var filters = new flxanimate.Filters();
-	public static var version:String;
-	public static var resolution:String;
 	@:noCompletion
 	public static function setFieldBool(abstracto:Dynamic, things:Array<String>, ?set:Dynamic):Dynamic
 	{
@@ -27,9 +28,112 @@ class AnimationData
 				return Reflect.field(abstracto, thing);
 			}
 		}
-
 		return Reflect.field(abstracto, "");
 	}
+	public static function fromColorJson(effect:ColorEffects = null)
+	{
+		var colorEffect = None;
+
+		if (effect == null) return colorEffect;
+		
+		switch (effect.M)
+		{
+			case Tint, "Tint":
+				var tc = "0x" + effect.TC.substring(1);
+				
+				colorEffect = Tint(Std.parseInt(tc), effect.TM);
+			case Alpha, "Alpha":
+				colorEffect = Alpha(effect.AM);
+			case Brightness, "Brightness":
+				colorEffect = Brightness(effect.BRT);
+			case Advanced, "Advanced":
+			{
+				var CT = new ColorTransform();
+				CT.redMultiplier = effect.RM;
+				CT.redOffset = effect.RO;
+				CT.greenMultiplier = effect.GM;
+				CT.greenOffset = effect.GO;
+				CT.blueMultiplier = effect.BM;
+				CT.blueOffset = effect.BO;
+				CT.alphaMultiplier = effect.AM;
+				CT.alphaOffset = effect.AO;
+				colorEffect = Advanced(CT);
+			}
+			default:
+				flixel.FlxG.log.error('color Effect mode "${effect.M}" is invalid or not supported!');
+		}
+		return colorEffect;
+	}
+	public static function fromFilterJson(filters:Filters = null) 
+	{
+		if (filters == null) return [];
+		var bitmapFilter:Array<BitmapFilter> = [];
+
+		return bitmapFilter;
+	}
+	public static function parseColorEffect(colorEffect:ColorEffect = None)
+	{
+		var CT = new ColorTransform();
+        
+        if ([None, null].indexOf(colorEffect) == -1)
+        {
+            var params = colorEffect.getParameters();
+            switch (colorEffect.getName())
+            {
+                case "Tint":
+                    var color:flixel.util.FlxColor = params[0];
+                    var opacity:Float = params[1];
+					
+                    CT.redMultiplier -= opacity;
+                    CT.redOffset = Math.round(color.red * opacity);
+                    CT.greenMultiplier -= opacity;
+                    CT.greenOffset = Math.round(color.green * opacity);
+                    CT.blueMultiplier -= opacity;
+                    CT.blueOffset = Math.round(color.blue * opacity);
+					
+                case "Alpha":
+                    CT.alphaMultiplier = params[0];
+                case "Brightness":
+
+                    CT.redMultiplier = CT.greenMultiplier = CT.blueMultiplier -= Math.abs(params[0]);
+                    if (params[0] >= 0)
+                        CT.redOffset = CT.greenOffset = CT.blueOffset = 255 * params[0];
+                case "Advanced":
+                    CT.concat(params[0]);
+            }
+        }
+
+		return CT;
+	}
+}
+
+enum ColorEffect
+{
+    None;
+    Brightness(Bright:Float);
+    Tint(Color:flixel.util.FlxColor, Opacity:Float);
+    Alpha(Alpha:Float);
+    Advanced(transform:ColorTransform);
+}
+enum Loop
+{
+	Loop;
+	PlayOnce;
+	SingleFrame;
+}
+enum SymbolT
+{
+	Graphic;
+	MovieClip;
+	Button;
+}
+
+enum LayerType
+{
+	Normal;
+	Clipper;
+	Clipped(layer:String);
+	Folder;
 }
 
 abstract AnimAtlas({}) from {}
@@ -39,7 +143,7 @@ abstract AnimAtlas({}) from {}
 	 */
 	public var AN(get, never):Animation;
 	/**
-	 * This collects the symbols and gets it into weird stuff so it can be used on the anim, **WARNING:** Can be `Null` or `undefined`
+	 * This is where all the symbols that the main animation uses are stored. Can be `null`!
 	 */
 	public var SD(get, never):SymbolDictionary;
 	/**
@@ -62,12 +166,12 @@ abstract AnimAtlas({}) from {}
 	}
 }
 /**
- * The list of symbols that the anim uses
+ * The Dictionary itself, where all the symbols are stored.
  */
 abstract SymbolDictionary({}) from {}
 {
 	/**
-	 * The list of Symbols used in an animation
+	 * The list of symbols.
 	 */
 	public var S(get, never):Array<SymbolData>;
 
@@ -82,19 +186,20 @@ abstract SymbolDictionary({}) from {}
 abstract Animation({}) from {}
 {
 	/**
-	 * The name of the symbol
+	 * The name of the symbol.
 	 */
 	public var SN(get, never):String;
 	/**
-	 * The name of the document which was exported
+	 * The name of the fla document.
 	 */
 	public var N(get, never):String;
 	/**
-	 * The timeline of the animation which was exported
+	 * The timeline of the symbol.
 	 */
 	public var TL(get, never):Timeline;
 	/**
-	 * Optional: Some docs have an STI, which idk what is it tbh
+	 * Its the stage instance of the timeline, basically how was the texture atlas set when it was on "the stage" of Adobe Animate.
+	 * Can be included or not depending if you export the atlas on stage or on the symbol dictionary.
 	 */
 	public var STI(get, never):StageInstance;
 
@@ -115,9 +220,16 @@ abstract Animation({}) from {}
 		return AnimationData.setFieldBool(this, ["STI", "StageInstance"]);
 	}
 }
-
+/**
+ * The main position how the symbol you exported was set, Acting almost identically as an `Element`, with the exception of not having an Atlas Sprite to call (not that I'm aware of).
+ * **WARNING:** This may depend on how you exported your texture atlas, Meaning that this can be `null`
+ */
 abstract StageInstance({}) 
 {
+	/**
+	 * The instance of the Element flagged as a `Symbol`.
+	 * **WARNING:** This can be `null`!
+	 */
 	public var SI(get, never):SymbolInstance;
 
 	function get_SI():SymbolInstance
@@ -177,14 +289,29 @@ abstract Layers({}) from {}
 	 */
 	public var LN(get, never):String;
 	/**
+	 * Type of layer. Usually it's just to announce that the layer is a mask.
+	 */
+	public var LT(get, never):String;
+	/**
+	 * To which layer it is clipped.
+	 */
+	public var Clpb(get, never):String;
+	/**
 	 * The frames that the layer has.
 	 */
 	public var FR(get, set):Array<Frame>;
 
 	function get_LN():String
 	{
-		
 		return AnimationData.setFieldBool(this, ["LN", "Layer_name"]);
+	}
+	function get_LT():String
+	{
+		return AnimationData.setFieldBool(this, ["LT", "Layer_type"]);
+	}
+	function get_Clpb():String
+	{
+		return AnimationData.setFieldBool(this, ["Clpb", "Clipped_by"]);
 	}
 	function get_FR():Array<Frame>
 	{
@@ -481,7 +608,11 @@ abstract ColorEffects({}) from {}
 abstract Filters({})
 {
 	/**
-	 * Adjusting the color filter... This is the filter which has small support, the rest doesn't have a shit
+	 * Adjust Color filter is basically Color Matrix Filter, but with the exception of some premade calculation to give the illusion of changing the wheel.
+	 * @see flxanimate.motion.AdjustColor
+	 * @see flxanimate.motion.ColorMatrix
+	 * @see flxanimate.motion.DynamicMatrix
+	 * @see openfl.filters.ColorMatrixFilter
 	 */
 	public var ACF(get, never):AdjustColorFilter;
 
@@ -490,12 +621,26 @@ abstract Filters({})
 		return AnimationData.setFieldBool(this, ["ACF", "AdjustColorFilter"]);
 	}
 }
-// The filters aren't looked much lol
+/**
+ * A full matrix calculation thing that seems to behave like a special HSV adjust.
+ */
 abstract AdjustColorFilter({})
 {
+	/**
+	 * The brightness value. Can be from -100 to 100
+	 */
 	public var BRT(get, never):Float;
+	/**
+	 * The value of contrast. Can be from -100 to 100
+	 */
 	public var CT(get, never):Float;
+	/**
+	 * The value of saturation. Can be from -100 to 100
+	 */
 	public var SAT(get, never):Float;
+	/**
+	 * The hue value. Can be from -180 to 180
+	 */
 	public var H(get, never):Float;
 
 	function get_BRT()
@@ -550,7 +695,7 @@ abstract Bitmap({}) from {}
 abstract AtlasSymbolInstance(Bitmap) from {}
 {
 	/**
-	 * The matrix of the Sprite, Neo should be here at any second!!!
+	 * The matrix of the sprite itself. Can be either an array or a typedef.
 	 */
 	public var M3D(get, never):OneOfTwo<Array<Float>, Matrix3D>;
 
@@ -588,11 +733,7 @@ typedef TransformationPoint =
 	var y:Float;
 }
 
-typedef BlurFilterS = {
-	var BLX:Float;
-	var BLY:Float;
-	var Q:Int;
-}
+@:forward
 enum abstract LoopType(String) from String to String
 {
 	var loop = "LP";
